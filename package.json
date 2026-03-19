@@ -1,0 +1,25 @@
+{
+  "name": "tempo1",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "npx tsx src/index.ts",
+    "demo": "npx tsx scripts/demo.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@hono/node-server": "^1.19.11",
+    "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0",
+    "hono": "^4.12.8"
+  },
+  "devDependencies": {
+    "@types/blessed": "^0.1.27",
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
