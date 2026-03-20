@@ -544,31 +544,43 @@ export function getDashboardHtml(paymentMode: PaymentMode = "free"): string {
     text-align: right;
   }
 
-  /* ── Architecture Diagram ── */
-  .arch-bar {
+  /* ── Install Bar ── */
+  .install-bar {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 10px 20px;
-    font-family: var(--mono);
-    font-size: 0.65rem;
-    color: var(--text-faint);
+    gap: 10px;
+    padding: 12px 20px;
     border-top: 1px solid var(--border);
-    letter-spacing: 0.02em;
   }
 
-  .arch-node {
-    padding: 3px 10px;
-    border-radius: 3px;
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    color: var(--text-muted);
+  .install-label {
+    font-family: var(--sans);
+    font-size: 0.68rem;
+    color: var(--text-faint);
   }
 
-  .arch-node.highlight {
-    border-color: var(--border-accent);
+  .install-cmd {
+    font-family: var(--mono);
+    font-size: 0.72rem;
     color: var(--accent);
+    background: rgba(99,220,190,0.06);
+    border: 1px solid rgba(99,220,190,0.15);
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 150ms ease;
+    user-select: all;
+  }
+
+  .install-cmd:hover {
+    background: rgba(99,220,190,0.12);
+  }
+
+  .install-cmd.copied {
+    color: var(--gold);
+    border-color: rgba(245,183,49,0.3);
+    background: rgba(245,183,49,0.06);
   }
 
   .arch-arrow {
@@ -670,12 +682,9 @@ export function getDashboardHtml(paymentMode: PaymentMode = "free"): string {
           </div>
         </div>
       </div>
-      <div class="arch-bar">
-        <span class="arch-node">Agent</span>
-        <span class="arch-arrow">&rarr;</span>
-        <span class="arch-node highlight">mpprouter</span>
-        <span class="arch-arrow">&rarr;</span>
-        <span class="arch-node">Provider</span>
+      <div class="install-bar">
+        <span class="install-label">Add to Claude Code:</span>
+        <span class="install-cmd" id="install-cmd" title="Click to copy">npx mpprouter</span>
       </div>
     </div>
 
@@ -908,6 +917,21 @@ export function getDashboardHtml(paymentMode: PaymentMode = "free"): string {
     es.addEventListener('error', function() {
       document.getElementById('live-dot').classList.remove('connected');
       document.getElementById('live-text').textContent = 'reconnecting';
+    });
+  }
+
+  // Copy install command
+  var installCmd = document.getElementById('install-cmd');
+  if (installCmd) {
+    installCmd.addEventListener('click', function() {
+      navigator.clipboard.writeText('npx mpprouter').then(function() {
+        installCmd.textContent = 'copied!';
+        installCmd.classList.add('copied');
+        setTimeout(function() {
+          installCmd.textContent = 'npx mpprouter';
+          installCmd.classList.remove('copied');
+        }, 1500);
+      });
     });
   }
 
