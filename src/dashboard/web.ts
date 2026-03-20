@@ -692,6 +692,14 @@ export function getDashboardHtml(paymentMode: PaymentMode = "free"): string {
         <span class="panel-title" id="tx-rate"></span>
       </div>
       <div class="panel-body">
+        <div class="tx tx-header" style="animation:none;border-bottom:1px solid rgba(255,255,255,0.08)">
+          <span></span>
+          <span class="tx-time" style="color:var(--text-faint)">time</span>
+          <span class="tx-route"><span style="color:var(--text-faint);font-family:var(--mono);font-size:0.65rem">route</span></span>
+          <span class="tx-cost" style="color:var(--text-faint)">${isPaid ? 'charged' : 'cost'}</span>
+          <span class="tx-saved" style="color:var(--text-faint)">${isPaid ? 'cost' : 'saved'}</span>
+          <span class="tx-ms" style="color:var(--text-faint)">latency</span>
+        </div>
         <div id="feed">
           <div class="empty-state">
             <div class="empty-icon">~</div>
@@ -786,9 +794,16 @@ export function getDashboardHtml(paymentMode: PaymentMode = "free"): string {
   function makeTx(tx) {
     var el = document.createElement('div');
     el.className = 'tx';
-    var saved = (tx.savedVsNext != null && tx.savedVsNext > 0)
-      ? '<span class="tx-saved">' + fmt(tx.savedVsNext) + '</span>'
-      : '<span class="tx-saved"></span>';
+    var col4, col5;
+    if (PAID) {
+      col4 = '<span class="tx-cost" title="charged">' + (tx.chargedAmount != null ? fmt(tx.chargedAmount) : '\\u2014') + '</span>';
+      col5 = '<span class="tx-saved" title="upstream cost">' + (tx.amount != null ? fmt(tx.amount) : '') + '</span>';
+    } else {
+      col4 = '<span class="tx-cost" title="cost">' + fmt(tx.amount) + '</span>';
+      col5 = (tx.savedVsNext != null && tx.savedVsNext > 0)
+        ? '<span class="tx-saved" title="saved vs next">\\u2193' + fmt(tx.savedVsNext) + '</span>'
+        : '<span class="tx-saved"></span>';
+    }
     el.innerHTML =
       '<span class="tx-pip ' + tx.status + '"></span>' +
       '<span class="tx-time">' + timeStr(tx.timestamp) + '</span>' +
@@ -797,8 +812,7 @@ export function getDashboardHtml(paymentMode: PaymentMode = "free"): string {
         '<span class="tx-arrow">&#8594;</span>' +
         '<span class="tx-provider">' + tx.provider + '</span>' +
       '</span>' +
-      '<span class="tx-cost">' + fmt(tx.amount) + '</span>' +
-      saved +
+      col4 + col5 +
       '<span class="tx-ms">' + tx.latencyMs + 'ms</span>';
     return el;
   }
