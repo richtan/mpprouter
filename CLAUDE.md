@@ -27,6 +27,7 @@ Claude Code --[stdio MCP]--> local npx mpprouter --[HTTP + MPP 402]--> mpprouter
 | `src/payments/payer.ts` | Upstream mppx client (signs with SPENDING_KEY) |
 | `src/payments/receiver.ts` | Incoming mppx server (HTTP + MCP SDK transports) |
 | `src/payments/pricing.ts` | Markup calculation (20% + min $0.002) |
+| `src/payments/db.ts` | SQLite persistence (schema, insert, load, aggregates) |
 | `src/payments/tracker.ts` | Transaction tracking, budget, revenue stats |
 | `src/dashboard/web.ts` | Web dashboard HTML + SSE streaming |
 | `bin/mpprouter.mjs` | npm bin shim (spawns tsx on client.ts) |
@@ -52,12 +53,22 @@ Caller pays $0.012 --> mpprouter pays $0.01 --> upstream provider
 | `MPP_SECRET_KEY` | Yes (paid mode) | HMAC secret for 402 challenge verification |
 | `API_KEY` | No | Bearer token for auth mode |
 | `BUDGET` | No (default: `5`) | Max USD spend limit |
+| `DATA_DIR` | No (default: `/data`) | Directory for SQLite database file |
+
+## Persistence
+
+Transaction history is persisted to SQLite via `better-sqlite3` (synchronous, in-process). On startup, the tracker hydrates aggregates and recent transactions from the database. Falls back to in-memory if the db path is unavailable.
+
+- **Database file**: `$DATA_DIR/mpprouter.db` (default `/data/mpprouter.db`)
+- **WAL mode** enabled for concurrent read/write performance
+- **Railway volume** mounted at `/data` provides persistence across deploys
 
 ## Deployment
 
 - **Hosted on Railway** with auto-deploy from GitHub pushes to `main`
 - **Domain**: mpprouter.com
 - **Dockerfile**: `node:22-alpine`, `npm ci`, runs `tsx src/index.ts --no-tui`
+- **Volume**: Railway volume mounted at `/data` for SQLite persistence
 
 ## npm Publishing
 
