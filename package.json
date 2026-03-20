@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "npx tsx src/index.ts",
-    "start": "./node_modules/.bin/tsx src/index.ts --no-tui",
+    "dev": "npx tsx --env-file=.env src/index.ts",
+    "start": "./node_modules/.bin/tsx --env-file=.env src/index.ts --no-tui",
     "demo": "npx tsx scripts/demo.ts"
   },
   "keywords": [],
@@ -13,12 +13,14 @@
   "description": "",
   "dependencies": {
     "@hono/node-server": "^1.19.11",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",
     "hono": "^4.12.8",
     "mppx": "^0.4.7",
     "tsx": "^4.21.0",
-    "viem": "^2.47.5"
+    "viem": "^2.47.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/blessed": "^0.1.27",

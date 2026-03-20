@@ -12,6 +12,10 @@ export interface TxEvent {
   status: "success" | "payment_error" | "service_error";
   latencyMs: number;
   responsePreview?: string;
+  /** What we charged the caller (null in free/auth mode) */
+  chargedAmount: number | null;
+  /** Margin earned: charged - upstream cost (null if unknown) */
+  revenue: number | null;
 }
 
 const MAX_LOG = 1000;
@@ -20,6 +24,9 @@ export class PaymentTracker extends EventEmitter {
   private log: TxEvent[] = [];
   private totalSpent = 0;
   private totalSaved = 0;
+  private totalCharged = 0;
+  private totalRevenue = 0;
+  private totalLoss = 0;
   private budget: number | null = null;
 
   record(event: TxEvent) {
@@ -28,9 +35,23 @@ export class PaymentTracker extends EventEmitter {
       this.log.shift();
     }
 
-    if (event.amount != null && event.status === "success") {
-      this.totalSpent += event.amount;
+    if (event.status === "success") {
+      if (event.amount != null) {
+        this.totalSpent += event.amount;
+      }
+      if (event.chargedAmount != null) {
+        this.totalCharged += event.chargedAmount;
+      }
+      if (event.revenue != null) {
+        this.totalRevenue += event.revenue;
+      }
     }
+
+    // Track loss: caller paid but upstream failed
+    if (event.status !== "success" && event.chargedAmount != null && event.chargedAmount > 0) {
+      this.totalLoss += event.chargedAmount;
+    }
+
     if (event.savedVsNext != null && event.savedVsNext > 0) {
       this.totalSaved += event.savedVsNext;
     }
@@ -75,5 +96,22 @@ export class PaymentTracker extends EventEmitter {
     const wouldHaveSpent = this.totalSpent + this.totalSaved;
     if (wouldHaveSpent === 0) return 0;
     return (this.totalSaved / wouldHaveSpent) * 100;
+  }
+
+  getTotalCharged(): number {
+    return this.totalCharged;
+  }
+
+  getTotalRevenue(): number {
+    return this.totalRevenue;
+  }
+
+  getTotalLoss(): number {
+    return this.totalLoss;
+  }
+
+  getMarginPercent(): number {
+    if (this.totalCharged === 0) return 0;
+    return (this.totalRevenue / this.totalCharged) * 100;
   }
 }

@@ -15,11 +15,30 @@ export function markFailed(serviceId: string) {
   recentFailures.set(serviceId, Date.now());
 }
 
-export function selectProvider(intent: string, store: ServiceStore): Selection | null {
+export function selectProvider(intent: string, store: ServiceStore, pinnedProviderId?: string | null): Selection | null {
   const providers = store.getProviders(intent);
   if (providers.length === 0) return null;
 
   const now = Date.now();
+
+  // If a provider is pinned (from a previous 402 round-trip), prefer it
+  if (pinnedProviderId) {
+    const pinned = providers.find((p) => p.serviceId === pinnedProviderId);
+    if (pinned) {
+      const failedAt = recentFailures.get(pinned.serviceId);
+      const isAvailable = !failedAt || now - failedAt > FAILURE_COOLDOWN_MS;
+      if (isAvailable) {
+        const others = providers.filter((p) => p.serviceId !== pinnedProviderId);
+        return {
+          chosen: pinned,
+          alternatives: others,
+          savedVsNext: computeSavings(pinned, others[0]),
+        };
+      }
+    }
+    // Pinned provider unavailable — fall through to normal selection
+    // (will cause amount mismatch and a new 402)
+  }
 
   // Filter out recently failed providers
   const available = providers.filter((p) => {

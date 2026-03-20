@@ -2,118 +2,124 @@ import type { Context } from "hono";
 import { payRequest } from "../payments/payer.js";
 import { PaymentTracker, type TxEvent } from "../payments/tracker.js";
 import { ServiceStore } from "../discovery/store.js";
-import { selectProvider, markFailed } from "../routing/selector.js";
-import { getIntentDef } from "../routing/intents.js";
+import { selectProvider } from "../routing/selector.js";
+import { calculateChargeUsd, usdToTokenAmount, getMarkupUsd, MARKUP_DEFAULT } from "../payments/pricing.js";
+import { type PaymentHandler, extractPinnedProvider } from "../payments/receiver.js";
+import { executeIntent } from "../routing/executor.js";
 
 /** Headers safe to forward from caller to upstream */
 const FORWARDED_HEADERS = ["content-type", "accept", "user-agent"];
 
 export class RequestHandler {
+  private mppx: PaymentHandler | null = null;
+
   constructor(
     private store: ServiceStore,
-    private tracker: PaymentTracker
+    private tracker: PaymentTracker,
+    private paymentMode: "paid" | "auth" | "free" = "free"
   ) {}
+
+  setPaymentHandler(mppx: PaymentHandler) {
+    this.mppx = mppx;
+  }
 
   async handleIntent(c: Context): Promise<Response> {
     try {
       const intent = c.req.param("intent") as string;
       const params = c.req.query();
 
-      // Budget check
+      // Budget check — return 503 (not 402) to avoid collision with payment challenges
       if (this.tracker.isOverBudget()) {
-        return c.json({ error: "Budget exceeded", spent: this.tracker.getTotalSpent() }, 402);
+        return c.json({ error: "Router budget exceeded", spent: this.tracker.getTotalSpent() }, 503);
       }
 
-      const selection = selectProvider(intent, this.store);
+      // Check for pinned provider from a previous 402 round-trip
+      const authHeader = c.req.header("authorization");
+      const pinnedProviderId = this.paymentMode === "paid" ? extractPinnedProvider(authHeader) : null;
+
+      // Select provider ONCE (used for both pricing and execution)
+      const selection = selectProvider(intent, this.store, pinnedProviderId);
       if (!selection) {
         return c.json({ error: `No providers found for intent: ${intent}`, available: this.store.getAllIntents() }, 404);
       }
 
       const { chosen, savedVsNext } = selection;
-      const intentDef = getIntentDef(intent);
 
-      // Build request
-      let url: string;
-      let method: string;
-      let body: string | undefined;
+      // Payment gate (paid mode only)
+      let chargedUsd: number | null = null;
+      let paymentResult: any = null;
 
-      if (intentDef?.buildUrl) {
-        const built = intentDef.buildUrl(
-          { serviceUrl: chosen.serviceUrl, endpointPath: chosen.endpoint.path },
-          params
-        );
-        url = built.url;
-        method = built.method;
-        body = built.body;
-      } else {
-        // Default: append query params to endpoint
-        const qs = new URLSearchParams(params).toString();
-        url = `${chosen.serviceUrl}${chosen.endpoint.path}${qs ? "?" + qs : ""}`;
-        method = chosen.endpoint.method || intentDef?.defaultMethod || "GET";
+      if (this.paymentMode === "paid" && this.mppx) {
+        chargedUsd = calculateChargeUsd(chosen.priceUsd);
+        const amount = usdToTokenAmount(chargedUsd);
+        const chargeHandler = this.mppx.charge({
+          amount,
+          description: `mpprouter: ${intent} via ${chosen.serviceName}`,
+          meta: { providerId: chosen.serviceId },
+        });
+
+        paymentResult = await chargeHandler(c.req.raw);
+
+        if (paymentResult.status === 402) {
+          return paymentResult.challenge;
+        }
       }
 
-      // If there's a raw body in the request, forward it
-      if (c.req.method === "POST" && !body) {
+      // Read body if POST and not already consumed
+      let body: string | undefined;
+      if (c.req.method === "POST") {
         try {
           body = await c.req.text();
-          if (body) method = "POST";
+          if (!body) body = undefined;
         } catch {}
       }
 
       // Forward relevant caller headers
       const forwardHeaders = extractForwardHeaders(c);
 
-      // Execute paid request
-      const result = await payRequest(url, method, forwardHeaders, body);
-
-      // Record transaction
-      const txEvent: TxEvent = {
-        timestamp: new Date(),
-        intent,
-        provider: chosen.serviceName,
-        serviceId: chosen.serviceId,
-        url,
-        method,
-        amount: chosen.priceUsd,
-        savedVsNext: savedVsNext,
-        status: result.success ? "success" : result.statusCode === 402 ? "payment_error" : "service_error",
-        latencyMs: result.latencyMs,
-        responsePreview: typeof result.response === "string"
-          ? result.response.slice(0, 100)
-          : JSON.stringify(result.response)?.slice(0, 100),
-      };
-      this.tracker.record(txEvent);
+      // Execute intent via shared executor
+      const result = await executeIntent(
+        { intent, params, body, forwardHeaders, selection, chargedAmount: chargedUsd },
+        this.store, this.tracker
+      );
 
       if (!result.success) {
-        markFailed(chosen.serviceId);
-        return c.json(
+        const errorResponse = c.json(
           {
             error: result.error,
-            provider: chosen.serviceName,
-            mpprouter: { intent, routed_to: chosen.serviceId, alternatives: selection.alternatives.map((a) => a.serviceId) },
+            provider: result.chosen.serviceName,
+            mpprouter: { intent, routed_to: result.chosen.serviceId, alternatives: result.alternatives },
           },
-          result.statusCode === 402 ? 402 : 502
+          502
         );
+        return errorResponse;
       }
 
-      // Return response with mpprouter headers
+      // Build response with mpprouter headers
       const headers: Record<string, string> = {
         "Content-Type": result.contentType,
         "X-MppRouter-Intent": intent,
-        "X-MppRouter-Provider": chosen.serviceName,
-        "X-MppRouter-ServiceId": chosen.serviceId,
+        "X-MppRouter-Provider": result.chosen.serviceName,
+        "X-MppRouter-ServiceId": result.chosen.serviceId,
       };
       if (savedVsNext != null) {
         headers["X-MppRouter-Saved"] = `$${savedVsNext.toFixed(4)}`;
       }
-      if (chosen.priceUsd != null) {
-        headers["X-MppRouter-Price"] = `$${chosen.priceUsd.toFixed(4)}`;
+      if (result.chosen.priceUsd != null) {
+        headers["X-MppRouter-Price"] = `$${result.chosen.priceUsd.toFixed(4)}`;
       }
 
-      return new Response(result.responseRaw, {
+      const response = new Response(result.responseRaw, {
         status: result.statusCode,
         headers,
       });
+
+      // Wrap with Payment-Receipt header if paid
+      if (paymentResult && paymentResult.status === 200) {
+        return paymentResult.withReceipt(response);
+      }
+
+      return response;
     } catch (err: any) {
       console.error("handleIntent error:", err?.message);
       return c.json({ error: "Internal proxy error" }, 502);
@@ -125,7 +131,6 @@ export class RequestHandler {
       // Extract target from path: /proxy/parallelmpp.dev/api/search -> https://parallelmpp.dev/api/search
       const path = c.req.path.replace(/^\/proxy\//, "");
 
-      // Validate non-empty path
       if (!path || path === "/") {
         return c.json({ error: "Missing target URL path" }, 400);
       }
@@ -146,45 +151,81 @@ export class RequestHandler {
         return c.json({ error: "Unknown service host", host: targetHost }, 403);
       }
 
-      const method = c.req.method;
+      // Budget check — return 503 (not 402)
+      if (this.tracker.isOverBudget()) {
+        return c.json({ error: "Router budget exceeded", spent: this.tracker.getTotalSpent() }, 503);
+      }
+
+      const reqMethod = c.req.method;
 
       let body: string | undefined;
-      if (method === "POST" || method === "PUT" || method === "PATCH") {
+      if (reqMethod === "POST" || reqMethod === "PUT" || reqMethod === "PATCH") {
         try {
           body = await c.req.text();
         } catch {}
       }
 
-      // Forward relevant caller headers
       const forwardHeaders = extractForwardHeaders(c);
 
-      // Look up which service this is for savings tracking
+      // Look up which service this is for pricing/tracking
       const match = this.store.findByUrl(targetUrl);
+      const upstreamPrice = match?.provider.priceUsd ?? null;
 
-      const result = await payRequest(targetUrl, method, forwardHeaders, body);
+      // Payment gate (paid mode)
+      let chargedUsd: number | null = null;
+      let paymentResult: any = null;
 
+      if (this.paymentMode === "paid" && this.mppx) {
+        chargedUsd = calculateChargeUsd(upstreamPrice);
+        const amount = usdToTokenAmount(chargedUsd);
+        const chargeHandler = this.mppx.charge({
+          amount,
+          description: `mpprouter: direct proxy to ${targetHost}`,
+          meta: { targetUrl },
+        });
+
+        paymentResult = await chargeHandler(c.req.raw);
+
+        if (paymentResult.status === 402) {
+          return paymentResult.challenge;
+        }
+      }
+
+      const result = await payRequest(targetUrl, reqMethod, forwardHeaders, body);
+
+      // Use MARKUP_DEFAULT for budget tracking when price unknown
+      const trackingAmount = upstreamPrice ?? MARKUP_DEFAULT;
+
+      const revenue = chargedUsd != null ? getMarkupUsd(upstreamPrice, chargedUsd) : null;
       const txEvent: TxEvent = {
         timestamp: new Date(),
         intent: match?.intent || "direct",
         provider: match?.provider.serviceName || path.split("/")[0],
         serviceId: match?.provider.serviceId || "unknown",
         url: targetUrl,
-        method,
-        amount: match?.provider.priceUsd || null,
+        method: reqMethod,
+        amount: result.success ? trackingAmount : (upstreamPrice ?? null),
         savedVsNext: null,
         status: result.success ? "success" : "service_error",
         latencyMs: result.latencyMs,
         responsePreview: typeof result.response === "string"
           ? result.response.slice(0, 100)
           : JSON.stringify(result.response)?.slice(0, 100),
+        chargedAmount: chargedUsd,
+        revenue: result.success ? revenue : null,
       };
       this.tracker.record(txEvent);
 
       if (!result.success) {
-        return c.json({ error: result.error, url: targetUrl }, result.statusCode === 402 ? 402 : 502);
+        if (chargedUsd != null) {
+          console.warn(
+            `[LOSS] Direct proxy failed after payment: url=${targetUrl} charged=$${chargedUsd.toFixed(4)} status=${result.statusCode}`
+          );
+        }
+        return c.json({ error: result.error, url: targetUrl }, result.statusCode === 402 ? 502 : 502);
       }
 
-      return new Response(result.responseRaw, {
+      const response = new Response(result.responseRaw, {
         status: result.statusCode,
         headers: {
           "Content-Type": result.contentType,
@@ -192,6 +233,12 @@ export class RequestHandler {
           "X-MppRouter-Provider": match?.provider.serviceName || "unknown",
         },
       });
+
+      if (paymentResult && paymentResult.status === 200) {
+        return paymentResult.withReceipt(response);
+      }
+
+      return response;
     } catch (err: any) {
       console.error("handleDirect error:", err?.message);
       return c.json({ error: "Internal proxy error" }, 502);

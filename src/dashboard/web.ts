@@ -1,7 +1,9 @@
 import type { Context } from "hono";
 import type { PaymentTracker } from "../payments/tracker.js";
+import type { PaymentMode } from "../proxy/server.js";
 
-export function getDashboardHtml(): string {
+export function getDashboardHtml(paymentMode: PaymentMode = "free"): string {
+  const isPaid = paymentMode === "paid";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -58,6 +60,20 @@ export function getDashboardHtml(): string {
   }
 
   .dot.live { background: #4ade80; }
+
+  .mode-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    margin-left: 8px;
+  }
+
+  .mode-paid { background: rgba(250, 204, 21, 0.15); color: #facc15; }
+  .mode-auth { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+  .mode-free { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
 
   .grid {
     display: grid;
@@ -172,7 +188,7 @@ export function getDashboardHtml(): string {
     text-align: center;
   }
 
-  /* Savings */
+  /* Savings / Revenue */
   .hero-saved {
     font-family: "SF Mono", "Fira Code", monospace;
     font-size: 2.4rem;
@@ -211,6 +227,8 @@ export function getDashboardHtml(): string {
     color: #e2e8f0;
     transition: opacity 200ms ease;
   }
+
+  .stat-box .val.loss { color: #f87171; }
 
   /* Price Chart */
   .intent-select {
@@ -307,7 +325,11 @@ export function getDashboardHtml(): string {
 <body>
   <header>
     <span class="logo">&#9889; MPP ROUTER</span>
-    <span class="status"><span class="dot" id="status-dot"></span><span id="status-text">Connecting...</span></span>
+    <span class="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Connecting...</span>
+      <span class="mode-badge mode-${paymentMode}">${paymentMode}</span>
+    </span>
   </header>
 
   <div class="grid">
@@ -317,14 +339,21 @@ export function getDashboardHtml(): string {
     </div>
 
     <div class="panel">
-      <div class="panel-label">Savings</div>
+      <div class="panel-label">${isPaid ? "Revenue" : "Savings"}</div>
       <div class="hero-saved mono" id="hero-saved">$0.0000</div>
-      <div class="hero-pct" id="hero-pct">0% saved</div>
+      <div class="hero-pct" id="hero-pct">${isPaid ? "0% margin" : "0% saved"}</div>
       <div class="stat-grid">
+        ${isPaid ? `
+        <div class="stat-box"><label>Gross Charged</label><div class="val" id="stat-charged">$0.0000</div></div>
+        <div class="stat-box"><label>Upstream Cost</label><div class="val" id="stat-spent">$0.0000</div></div>
+        <div class="stat-box"><label>Requests</label><div class="val" id="stat-count">0</div></div>
+        <div class="stat-box"><label>Loss (failed)</label><div class="val loss" id="stat-loss">$0.0000</div></div>
+        ` : `
         <div class="stat-box"><label>Spent</label><div class="val" id="stat-spent">$0.0000</div></div>
         <div class="stat-box"><label>Would've been</label><div class="val" id="stat-would">$0.0000</div></div>
         <div class="stat-box"><label>Requests</label><div class="val" id="stat-count">0</div></div>
         <div class="stat-box"><label>Budget left</label><div class="val" id="stat-budget">No limit</div></div>
+        `}
       </div>
     </div>
 
@@ -346,27 +375,28 @@ export function getDashboardHtml(): string {
 
 <script>
 (function() {
-  let priceData = [];
-  const MAX_FEED = 50;
+  var PAID_MODE = ${isPaid};
+  var priceData = [];
+  var MAX_FEED = 50;
 
   function fmt(n) {
     if (n == null) return '—';
     return '$' + n.toFixed(4);
   }
 
-  function fmtPct(n) {
-    return n.toFixed(1) + '% saved';
+  function fmtPct(n, label) {
+    return n.toFixed(1) + '% ' + label;
   }
 
   function timeStr(ts) {
-    const d = new Date(ts);
+    var d = new Date(ts);
     return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
   function makeTxRow(tx) {
-    const row = document.createElement('div');
+    var row = document.createElement('div');
     row.className = 'tx-row';
-    const saved = (tx.savedVsNext != null && tx.savedVsNext > 0) ? '<span class="tx-saved">(saved ' + fmt(tx.savedVsNext) + ')</span>' : '';
+    var saved = (tx.savedVsNext != null && tx.savedVsNext > 0) ? '<span class="tx-saved">(saved ' + fmt(tx.savedVsNext) + ')</span>' : '';
     row.innerHTML =
       '<span class="tx-dot ' + tx.status + '"></span>' +
       '<span class="tx-time">' + timeStr(tx.timestamp) + '</span>' +
@@ -380,40 +410,55 @@ export function getDashboardHtml(): string {
   }
 
   function renderFeed(transactions) {
-    const feed = document.getElementById('feed');
+    var feed = document.getElementById('feed');
     feed.innerHTML = '';
     if (!transactions || transactions.length === 0) {
       feed.innerHTML = '<div class="empty-state">Waiting for requests...</div>';
       return;
     }
-    const reversed = [...transactions].reverse();
+    var reversed = transactions.slice().reverse();
     reversed.forEach(function(tx) {
       feed.appendChild(makeTxRow(tx));
     });
   }
 
   function updateStats(s) {
-    const flash = function(el) {
+    var flash = function(el) {
+      if (!el) return;
       el.style.opacity = '0.4';
       setTimeout(function() { el.style.opacity = '1'; }, 50);
     };
     var el;
-    el = document.getElementById('hero-saved');
-    el.textContent = fmt(s.totalSaved);
-    flash(el);
-    document.getElementById('hero-pct').textContent = fmtPct(s.savingsPercent);
-    el = document.getElementById('stat-spent');
-    el.textContent = fmt(s.totalSpent);
-    flash(el);
-    el = document.getElementById('stat-would');
-    el.textContent = fmt(s.totalSpent + s.totalSaved);
-    flash(el);
-    el = document.getElementById('stat-count');
-    el.textContent = s.transactionCount;
-    flash(el);
-    el = document.getElementById('stat-budget');
-    el.textContent = s.remainingBudget != null ? fmt(s.remainingBudget) : 'No limit';
-    flash(el);
+
+    if (PAID_MODE) {
+      // Revenue mode
+      el = document.getElementById('hero-saved');
+      el.textContent = fmt(s.totalRevenue);
+      flash(el);
+      document.getElementById('hero-pct').textContent = fmtPct(s.marginPercent, 'margin');
+      el = document.getElementById('stat-charged');
+      if (el) { el.textContent = fmt(s.totalCharged); flash(el); }
+      el = document.getElementById('stat-spent');
+      if (el) { el.textContent = fmt(s.totalSpent); flash(el); }
+      el = document.getElementById('stat-count');
+      if (el) { el.textContent = s.transactionCount; flash(el); }
+      el = document.getElementById('stat-loss');
+      if (el) { el.textContent = fmt(s.totalLoss); flash(el); }
+    } else {
+      // Savings mode
+      el = document.getElementById('hero-saved');
+      el.textContent = fmt(s.totalSaved);
+      flash(el);
+      document.getElementById('hero-pct').textContent = fmtPct(s.savingsPercent, 'saved');
+      el = document.getElementById('stat-spent');
+      if (el) { el.textContent = fmt(s.totalSpent); flash(el); }
+      el = document.getElementById('stat-would');
+      if (el) { el.textContent = fmt(s.totalSpent + s.totalSaved); flash(el); }
+      el = document.getElementById('stat-count');
+      if (el) { el.textContent = s.transactionCount; flash(el); }
+      el = document.getElementById('stat-budget');
+      if (el) { el.textContent = s.remainingBudget != null ? fmt(s.remainingBudget) : 'No limit'; flash(el); }
+    }
   }
 
   function renderPriceChart(intent) {
@@ -538,6 +583,10 @@ export function createEventStream(c: Context, tracker: PaymentTracker): Response
           savingsPercent: tracker.getSavingsPercent(),
           transactionCount: tracker.getTransactionCount(),
           remainingBudget: tracker.getRemainingBudget(),
+          totalCharged: tracker.getTotalCharged(),
+          totalRevenue: tracker.getTotalRevenue(),
+          totalLoss: tracker.getTotalLoss(),
+          marginPercent: tracker.getMarginPercent(),
         });
       }
 
