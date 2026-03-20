@@ -1,5 +1,5 @@
 /**
- * Demo script: fires a sequence of requests through the Switchboard proxy
+ * Demo script: fires a sequence of requests through the MPP Router proxy
  * to demonstrate intent routing, auto-payment, and savings tracking.
  *
  * Usage: npx tsx scripts/demo.ts
@@ -37,20 +37,20 @@ async function fireRequest(req: DemoRequest) {
   }
 
   const res = await fetch(url, { method: "POST", headers });
-  const switchboardHeaders: Record<string, string> = {};
+  const routerHeaders: Record<string, string> = {};
   res.headers.forEach((v, k) => {
-    if (k.startsWith("x-switchboard")) switchboardHeaders[k] = v;
+    if (k.startsWith("x-mpprouter")) routerHeaders[k] = v;
   });
 
   return {
     status: res.status,
-    headers: switchboardHeaders,
+    headers: routerHeaders,
     bodyPreview: (await res.text()).slice(0, 200),
   };
 }
 
 async function main() {
-  console.log("\n⚡ Switchboard Demo — Intelligent MPP Router\n");
+  console.log("\n⚡ MPP Router Demo\n");
   console.log(`Target: ${PROXY}`);
   console.log("Firing requests through the proxy...\n");
 
@@ -70,9 +70,9 @@ async function main() {
     console.log(`🔍 ${req.label}`);
     try {
       const result = await fireRequest(req);
-      const provider = result.headers["x-switchboard-provider"] || "unknown";
-      const price = result.headers["x-switchboard-price"] || "?";
-      const saved = result.headers["x-switchboard-saved"] || "N/A";
+      const provider = result.headers["x-mpprouter-provider"] || "unknown";
+      const price = result.headers["x-mpprouter-price"] || "?";
+      const saved = result.headers["x-mpprouter-saved"] || "N/A";
       console.log(`   → ${provider} | ${price} | Saved: ${saved} | ${result.status}\n`);
       totalRequests++;
     } catch (err: any) {

@@ -6,7 +6,7 @@ import type { ServiceStore } from "../discovery/store.js";
 export function startDashboard(tracker: PaymentTracker, store: ServiceStore) {
   const screen = blessed.screen({
     smartCSR: true,
-    title: "Switchboard",
+    title: "MPP Router",
     fullUnicode: true,
   });
 

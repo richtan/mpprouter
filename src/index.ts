@@ -6,9 +6,9 @@ import { startDashboard } from "./dashboard/tui.js";
 
 const BANNER = `
 {bold}{cyan-fg}
- ╔═══════════════════════════════════════════════╗
- ║   ⚡ SWITCHBOARD — Intelligent MPP Router ⚡  ║
- ╚═══════════════════════════════════════════════╝
+ ╔═════════════════════════════╗
+ ║      ⚡ MPP ROUTER ⚡      ║
+ ╚═════════════════════════════╝
 {/cyan-fg}{/bold}`;
 
 async function main() {

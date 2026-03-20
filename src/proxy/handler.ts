@@ -90,24 +90,24 @@ export class RequestHandler {
           {
             error: result.error,
             provider: chosen.serviceName,
-            switchboard: { intent, routed_to: chosen.serviceId, alternatives: selection.alternatives.map((a) => a.serviceId) },
+            mpprouter: { intent, routed_to: chosen.serviceId, alternatives: selection.alternatives.map((a) => a.serviceId) },
           },
           result.statusCode === 402 ? 402 : 502
         );
       }
 
-      // Return response with switchboard headers
+      // Return response with mpprouter headers
       const headers: Record<string, string> = {
         "Content-Type": result.contentType,
-        "X-Switchboard-Intent": intent,
-        "X-Switchboard-Provider": chosen.serviceName,
-        "X-Switchboard-ServiceId": chosen.serviceId,
+        "X-MppRouter-Intent": intent,
+        "X-MppRouter-Provider": chosen.serviceName,
+        "X-MppRouter-ServiceId": chosen.serviceId,
       };
       if (savedVsNext != null) {
-        headers["X-Switchboard-Saved"] = `$${savedVsNext.toFixed(4)}`;
+        headers["X-MppRouter-Saved"] = `$${savedVsNext.toFixed(4)}`;
       }
       if (chosen.priceUsd != null) {
-        headers["X-Switchboard-Price"] = `$${chosen.priceUsd.toFixed(4)}`;
+        headers["X-MppRouter-Price"] = `$${chosen.priceUsd.toFixed(4)}`;
       }
 
       return new Response(result.responseRaw, {
@@ -188,8 +188,8 @@ export class RequestHandler {
         status: result.statusCode,
         headers: {
           "Content-Type": result.contentType,
-          "X-Switchboard-Mode": "direct",
-          "X-Switchboard-Provider": match?.provider.serviceName || "unknown",
+          "X-MppRouter-Mode": "direct",
+          "X-MppRouter-Provider": match?.provider.serviceName || "unknown",
         },
       });
     } catch (err: any) {
